@@ -109,7 +109,6 @@ class MainAgent:
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=msgs,
-            top_p=1,
         )
 
         if hasattr(resp, "usage") and resp.usage:
@@ -362,10 +361,10 @@ class MainAgent:
 
         # TODO: remove
         final_prompt = core_prompt
-        # Print the full main agent prompt for debugging
-        print("\n==== MAIN AGENT FULL PROMPT ====")
-        print(final_prompt)
-        print("===============================\n")
+        # Debug print disabled to improve performance
+        # print("\n==== MAIN AGENT FULL PROMPT ====")
+        # print(final_prompt)
+        # print("===============================\n")
         return notes, self._chat(final_prompt, system=get_main_agent_system_message())
 
     # ---------------------------------------------------------------------
@@ -414,7 +413,8 @@ class MainAgent:
         # ------------------------------------------------------------------
         # 3) Summarise with memory
         # ------------------------------------------------------------------
-        notes, decision = self.summarise(facts, memory_txt=mem_txt, original_transcript=row["transcript"], financial_statements_facts=financial_statements_facts)
+        # NOTE: original_transcript removed to save tokens - facts + notes already contain all needed info
+        notes, decision = self.summarise(facts, memory_txt=mem_txt, original_transcript=None, financial_statements_facts=financial_statements_facts)
     
         # ------------------------------------------------------------------
         # 4) Return everything (memory included for logging/debug)

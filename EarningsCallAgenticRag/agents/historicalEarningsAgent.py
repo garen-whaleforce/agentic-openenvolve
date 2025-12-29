@@ -293,7 +293,6 @@ class HistoricalEarningsAgent:
                 {"role": "system", "content": get_historical_earnings_system_message()},
                 {"role": "user", "content": prompt},
             ],
-            top_p=1,
         )
         
         # Track token usage

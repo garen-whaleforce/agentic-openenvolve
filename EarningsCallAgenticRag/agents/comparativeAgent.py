@@ -384,12 +384,9 @@ class ComparativeAgent:
             return None
 
         # --- Craft prompt --------------------------------------------------
+        # NOTE: facts are already included in comparative_agent_prompt via {{facts}} placeholder
+        # Removed duplicate json.dumps(facts) to save tokens
         prompt = comparative_agent_prompt(facts, deduped_similar, self_ticker=ticker)
-        prompt = (
-            "The following is a *batch* of facts for the same company/quarter:\n"
-            + json.dumps(facts, indent=2)
-            + "\n\n" + prompt
-        )
         
         # Print the full prompt for debugging
         #print(f"\n{'='*80}")
@@ -405,7 +402,6 @@ class ComparativeAgent:
                     {"role": "system", "content": get_comparative_system_message()},
                     {"role": "user", "content": prompt},
                 ],
-                top_p=1,
             )
             
             # Track token usage

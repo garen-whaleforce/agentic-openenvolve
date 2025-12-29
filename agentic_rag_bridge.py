@@ -291,15 +291,15 @@ def run_single_call_from_context(
         match = re.search(r"Direction\s*:\s*(\d+)", summary, re.IGNORECASE)
         if match:
             score = int(match.group(1))
-            # 原始 mapping (garen1212v4):
+            # Updated mapping (prompt_v2 - no NEUTRAL allowed):
             # - Direction >= 6 視為 UP
-            # - Direction <= 4 視為 DOWN
-            # - Direction 5 視為 NEUTRAL
+            # - Direction <= 5 視為 DOWN (Direction 5 now maps to DOWN, not NEUTRAL)
+            # This aligns with the prompt instruction to never use Direction 5
+            # and lean DOWN when uncertain
             if score >= 6:
                 return "UP", score / 10
-            if score <= 4:
-                return "DOWN", score / 10
-            return "NEUTRAL", score / 10
+            # Direction 5 or below maps to DOWN (lean bearish when uncertain)
+            return "DOWN", score / 10
 
         lowered = summary.lower()
         if any(k in lowered for k in ["up", "increase", "growth", "record", "beat"]):

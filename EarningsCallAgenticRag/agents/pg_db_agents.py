@@ -146,7 +146,6 @@ class BasePgAgent(ABC):
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message},
             ],
-            top_p=1,
         )
 
         if hasattr(resp, 'usage') and resp.usage:

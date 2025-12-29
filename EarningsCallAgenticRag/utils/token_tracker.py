@@ -13,22 +13,53 @@ from typing import Any, Dict
 # =============================================================================
 # Format: MODEL_PREFIX_INPUT_PRICE and MODEL_PREFIX_OUTPUT_PRICE in USD per token
 
+# Pricing per token (from LiteLLM /model/info endpoint)
+# All values are in USD per token
 PRICING_CONFIG = {
+    # GPT-4o: $2.50/1M input, $10/1M output
     "gpt-4o": {
-        "input": float(os.getenv("GPT4O_INPUT_PRICE", "0.000005")),
-        "output": float(os.getenv("GPT4O_OUTPUT_PRICE", "0.000015")),
+        "input": float(os.getenv("GPT4O_INPUT_PRICE", "0.0000025")),
+        "output": float(os.getenv("GPT4O_OUTPUT_PRICE", "0.00001")),
     },
+    # GPT-4o-mini: $0.165/1M input, $0.66/1M output
+    "gpt-4o-mini": {
+        "input": float(os.getenv("GPT4O_MINI_INPUT_PRICE", "0.000000165")),
+        "output": float(os.getenv("GPT4O_MINI_OUTPUT_PRICE", "0.00000066")),
+    },
+    # GPT-4 (legacy): $30/1M input, $60/1M output
     "gpt-4": {
         "input": float(os.getenv("GPT4_INPUT_PRICE", "0.00003")),
         "output": float(os.getenv("GPT4_OUTPUT_PRICE", "0.00006")),
     },
+    # GPT-3.5: $1.5/1M input, $2/1M output
     "gpt-3.5": {
         "input": float(os.getenv("GPT35_INPUT_PRICE", "0.0000015")),
         "output": float(os.getenv("GPT35_OUTPUT_PRICE", "0.000002")),
     },
+    # Claude: $3/1M input, $15/1M output
     "claude": {
         "input": float(os.getenv("CLAUDE_INPUT_PRICE", "0.000003")),
         "output": float(os.getenv("CLAUDE_OUTPUT_PRICE", "0.000015")),
+    },
+    # GPT-5-mini (Azure/OpenAI via LiteLLM): $0.25/1M input, $2/1M output
+    "gpt-5-mini": {
+        "input": float(os.getenv("GPT5_MINI_INPUT_PRICE", "0.00000025")),
+        "output": float(os.getenv("GPT5_MINI_OUTPUT_PRICE", "0.000002")),
+    },
+    # GPT-5: $1.25/1M input, $10/1M output
+    "gpt-5": {
+        "input": float(os.getenv("GPT5_INPUT_PRICE", "0.00000125")),
+        "output": float(os.getenv("GPT5_OUTPUT_PRICE", "0.00001")),
+    },
+    # GPT-5-nano: $0.05/1M input, $0.4/1M output
+    "gpt-5-nano": {
+        "input": float(os.getenv("GPT5_NANO_INPUT_PRICE", "0.00000005")),
+        "output": float(os.getenv("GPT5_NANO_OUTPUT_PRICE", "0.0000004")),
+    },
+    # CLI-GPT-5.2 (estimate based on similar models)
+    "cli-gpt-5.2": {
+        "input": float(os.getenv("CLI_GPT52_INPUT_PRICE", "0.0000001")),
+        "output": float(os.getenv("CLI_GPT52_OUTPUT_PRICE", "0.0000008")),
     },
 }
 

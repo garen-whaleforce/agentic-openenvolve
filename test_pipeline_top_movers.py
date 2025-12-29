@@ -8,8 +8,10 @@ Tests the analysis pipeline on:
 
 Usage:
     python test_pipeline_top_movers.py [--test]  # --test runs only 3 samples first
+    python test_pipeline_top_movers.py [--concurrency N]  # Run with N concurrent workers (default: 5)
 """
 
+import argparse
 import asyncio
 import csv
 import json
@@ -338,47 +340,115 @@ def save_results_csv(results: List[Dict], samples: List[Dict], filename: str) ->
     return str(output_path)
 
 
-async def run_test_batch(samples: List[Dict], main_model: str, helper_model: str, all_samples: List[Dict]) -> List[Dict]:
-    """Run analysis on a batch of samples."""
+async def run_test_batch(samples: List[Dict], main_model: str, helper_model: str, all_samples: List[Dict], concurrency: int = 1) -> List[Dict]:
+    """Run analysis on a batch of samples with optional concurrency."""
     results = []
     total = len(samples)
+    completed = 0
+    lock = asyncio.Lock()
 
-    for i, sample in enumerate(samples, 1):
-        result = await analyze_single(
-            symbol=sample["symbol"],
-            year=sample["year"],
-            quarter=sample["quarter"],
-            main_model=main_model,
-            helper_model=helper_model,
-        )
+    # Create a semaphore to limit concurrency
+    semaphore = asyncio.Semaphore(concurrency)
 
-        # Add actual return from sample
-        if result["actual_return"] is None:
-            result["actual_return"] = sample.get("actual_return_30d")
+    async def process_sample(idx: int, sample: Dict) -> Dict:
+        nonlocal completed
+        async with semaphore:
+            result = await analyze_single(
+                symbol=sample["symbol"],
+                year=sample["year"],
+                quarter=sample["quarter"],
+                main_model=main_model,
+                helper_model=helper_model,
+            )
 
-        results.append(result)
-        print_result_line(i, total, result, sample)
+            # Add actual return from sample
+            if result["actual_return"] is None:
+                result["actual_return"] = sample.get("actual_return_30d")
 
-        # Print interim summary every 10 results
-        if i % 10 == 0:
-            print_interim_summary(results, all_samples)
+            async with lock:
+                completed += 1
+                print_result_line(completed, total, result, sample)
+
+                # Print interim summary every 20 results
+                if completed % 20 == 0:
+                    # Collect all completed results so far
+                    completed_results = [r for r in results if r is not None]
+                    completed_results.append(result)
+                    print_interim_summary(completed_results, all_samples)
+
+            return result
+
+    if concurrency == 1:
+        # Sequential execution (original behavior)
+        for i, sample in enumerate(samples, 1):
+            result = await analyze_single(
+                symbol=sample["symbol"],
+                year=sample["year"],
+                quarter=sample["quarter"],
+                main_model=main_model,
+                helper_model=helper_model,
+            )
+
+            if result["actual_return"] is None:
+                result["actual_return"] = sample.get("actual_return_30d")
+
+            results.append(result)
+            print_result_line(i, total, result, sample)
+
+            if i % 10 == 0:
+                print_interim_summary(results, all_samples)
+    else:
+        # Concurrent execution
+        print(f"\n🚀 Running with {concurrency} concurrent workers...")
+        tasks = [process_sample(i, sample) for i, sample in enumerate(samples, 1)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Handle any exceptions that occurred
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                sample = samples[i]
+                results[i] = {
+                    "symbol": sample["symbol"],
+                    "year": sample["year"],
+                    "quarter": sample["quarter"],
+                    "success": False,
+                    "error": str(result),
+                    "time_seconds": 0,
+                    "prediction": None,
+                    "confidence": None,
+                    "actual_return": sample.get("actual_return_30d"),
+                    "correct": None,
+                    "summary": None,
+                    "reasons": None,
+                    "token_usage": None,
+                    "agent_notes": None,
+                }
 
     return results
 
 
 async def main():
     """Main test runner."""
-    # Check for test mode
-    test_mode = "--test" in sys.argv
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Test pipeline for 2024 top movers")
+    parser.add_argument("--test", action="store_true", help="Run only 3 test samples")
+    parser.add_argument("--limit", "-n", type=int, default=0, help="Limit to N samples (0=all)")
+    parser.add_argument("--concurrency", "-c", type=int, default=5, help="Number of concurrent workers (default: 5)")
+    args = parser.parse_args()
+
+    test_mode = args.test
+    limit = args.limit
+    concurrency = args.concurrency
 
     print("=" * 80)
     print("2024 Top Movers Analysis Pipeline Test")
     print("=" * 80)
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Mode: {'TEST (3 samples)' if test_mode else 'FULL (200 samples)'}")
+    print(f"Concurrency: {concurrency} workers")
 
     main_model = os.getenv("MAIN_MODEL", "cli-gpt-5.2")
-    helper_model = os.getenv("HELPER_MODEL", "gpt-5-mini")
+    helper_model = os.getenv("HELPER_MODEL", "cli-gpt-5.2")
     print(f"Models: main={main_model}, helper={helper_model}")
 
     # Get top movers
@@ -406,7 +476,7 @@ async def main():
         print("Running test analyses...")
         print("-" * 80)
 
-        results = await run_test_batch(test_samples, main_model, helper_model, test_samples)
+        results = await run_test_batch(test_samples, main_model, helper_model, test_samples, concurrency=1)
 
         # Check for errors
         errors = [r for r in results if not r["success"]]
@@ -444,6 +514,10 @@ async def main():
     else:
         # Full run with all 200 samples
         all_samples = gainers + losers
+        if limit > 0:
+            # Take limit/2 from gainers and limit/2 from losers for balanced sampling
+            half = limit // 2
+            all_samples = gainers[:half] + losers[:half]
         print(f"\nTotal samples to process: {len(all_samples)}")
 
         print("\nTop 5 Gainers:")
@@ -458,7 +532,7 @@ async def main():
         print("Running analyses...")
         print("-" * 80)
 
-        results = await run_test_batch(all_samples, main_model, helper_model, all_samples)
+        results = await run_test_batch(all_samples, main_model, helper_model, all_samples, concurrency=concurrency)
 
         # Final summary
         print("\n" + "=" * 80)

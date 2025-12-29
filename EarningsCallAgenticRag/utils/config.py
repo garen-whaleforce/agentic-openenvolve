@@ -25,23 +25,23 @@ RETURN_HORIZON_DAYS = int(os.getenv("RETURN_HORIZON_DAYS", "30"))
 RETURN_COLUMN_FALLBACK = os.getenv("RETURN_COLUMN_FALLBACK", "future_3bday_cum_return")
 
 # =============================================================================
-# Facts Processing Limits
+# Facts Processing Limits (optimized for token efficiency without accuracy loss)
 # =============================================================================
 # Main Agent
-MAX_FACTS_PER_HELPER = int(os.getenv("MAX_FACTS_PER_HELPER", "80"))
-MAX_PEERS = int(os.getenv("MAX_PEERS", "10"))
+MAX_FACTS_PER_HELPER = int(os.getenv("MAX_FACTS_PER_HELPER", "30"))  # Reduced from 80
+MAX_PEERS = int(os.getenv("MAX_PEERS", "5"))  # Reduced from 10
 
 # Comparative Agent (peer comparison)
-MAX_FACTS_FOR_PEERS = int(os.getenv("MAX_FACTS_FOR_PEERS", "60"))
-MAX_PEER_FACTS = int(os.getenv("MAX_PEER_FACTS", "120"))
+MAX_FACTS_FOR_PEERS = int(os.getenv("MAX_FACTS_FOR_PEERS", "25"))  # Reduced from 60
+MAX_PEER_FACTS = int(os.getenv("MAX_PEER_FACTS", "40"))  # Reduced from 120
 
 # Historical Performance Agent (financial statements)
-MAX_FACTS_FOR_FINANCIALS = int(os.getenv("MAX_FACTS_FOR_FINANCIALS", "40"))
-MAX_FINANCIAL_FACTS = int(os.getenv("MAX_FINANCIAL_FACTS", "80"))
+MAX_FACTS_FOR_FINANCIALS = int(os.getenv("MAX_FACTS_FOR_FINANCIALS", "20"))  # Reduced from 40
+MAX_FINANCIAL_FACTS = int(os.getenv("MAX_FINANCIAL_FACTS", "30"))  # Reduced from 80
 
 # Historical Earnings Agent (past calls)
-MAX_FACTS_FOR_PAST = int(os.getenv("MAX_FACTS_FOR_PAST", "40"))
-MAX_HISTORICAL_FACTS = int(os.getenv("MAX_HISTORICAL_FACTS", "80"))
+MAX_FACTS_FOR_PAST = int(os.getenv("MAX_FACTS_FOR_PAST", "20"))  # Reduced from 40
+MAX_HISTORICAL_FACTS = int(os.getenv("MAX_HISTORICAL_FACTS", "30"))  # Reduced from 80
 
 # =============================================================================
 # Vector Search Configuration
