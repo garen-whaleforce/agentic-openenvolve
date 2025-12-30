@@ -13,7 +13,8 @@ from storage import (
     get_cached_payload,
     set_cached_payload,
 )
-from redis_cache import cache_get_json, cache_set_json
+# 使用 MinIO 取代 Redis 作為快取
+from minio_cache import cache_get_json, cache_set_json
 from earnings_backtest import compute_earnings_backtest
 
 # Whaleforce Services Integration
@@ -22,7 +23,7 @@ from services.backtester_client import BacktesterClient, get_backtester_client
 
 logger = logging.getLogger(__name__)
 PAYLOAD_CACHE_MINUTES = int(os.getenv("PAYLOAD_CACHE_MINUTES", "1440"))  # DB cache validity in minutes (default 1 day)
-REDIS_PAYLOAD_TTL_SECONDS = int(os.getenv("REDIS_PAYLOAD_TTL_SECONDS", "3600"))  # Redis TTL in seconds (default 1 hour)
+MINIO_PAYLOAD_TTL_SECONDS = int(os.getenv("MINIO_PAYLOAD_TTL_SECONDS", "3600"))  # MinIO TTL in seconds (default 1 hour)
 
 # Feature flags for service integrations
 ENABLE_PERFORMANCE_METRICS = os.getenv("ENABLE_PERFORMANCE_METRICS", "true").lower() == "true"
@@ -231,7 +232,7 @@ async def analyze_earnings_async(
 
         if isinstance(db_cached, dict) and db_cached.get("symbol"):
             try:
-                await cache_set_json(cache_key, db_cached, REDIS_PAYLOAD_TTL_SECONDS)
+                await cache_set_json(cache_key, db_cached, MINIO_PAYLOAD_TTL_SECONDS)
             except Exception:
                 pass
             return db_cached
@@ -319,7 +320,7 @@ async def analyze_earnings_async(
         logger.exception("set_cached_payload failed, ignoring", exc_info=exc)
 
     try:
-        await cache_set_json(cache_key, payload, REDIS_PAYLOAD_TTL_SECONDS)
+        await cache_set_json(cache_key, payload, MINIO_PAYLOAD_TTL_SECONDS)
     except Exception:
         pass
 

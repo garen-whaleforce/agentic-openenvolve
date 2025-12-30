@@ -1162,6 +1162,119 @@ def get_pre_earnings_momentum(symbol: str, earnings_date: str, days: int = 5) ->
 
 
 # =============================================================================
+# Market Stress Gate (SPY 20D Volatility)
+# =============================================================================
+
+def get_market_volatility(
+    target_date: str,
+    index_symbol: str = "SPY",
+    window_days: int = 20
+) -> Optional[Dict[str, Any]]:
+    """
+    Calculate realized volatility for market index as of target_date.
+
+    Args:
+        target_date: Date to calculate volatility as of (YYYY-MM-DD)
+        index_symbol: Market index symbol (default: SPY)
+        window_days: Rolling window for volatility calculation (default: 20)
+
+    Returns:
+        Dict with:
+            - daily_std: Daily standard deviation of returns
+            - annualized_vol: Annualized volatility (daily_std * sqrt(252))
+            - is_high_stress: True if annualized_vol > threshold
+            - window_start: Start date of window
+            - window_end: End date of window
+            - data_points: Number of data points used
+    """
+    import math
+
+    with get_cursor() as cur:
+        if cur is None:
+            return None
+        try:
+            # Get historical prices for the window (need window_days + 1 for returns)
+            cur.execute("""
+                SELECT date, adj_close
+                FROM historical_prices
+                WHERE UPPER(symbol) = %s AND date <= %s
+                ORDER BY date DESC
+                LIMIT %s
+            """, (index_symbol.upper(), target_date, window_days + 5))
+
+            rows = cur.fetchall()
+            if len(rows) < window_days:
+                logger.debug(f"Insufficient data for {index_symbol} volatility: {len(rows)} rows")
+                return None
+
+            # Calculate daily returns
+            prices = [(row["date"], float(row["adj_close"])) for row in rows]
+            prices.reverse()  # Oldest first
+
+            returns = []
+            for i in range(1, min(len(prices), window_days + 1)):
+                if prices[i-1][1] > 0:
+                    ret = (prices[i][1] / prices[i-1][1]) - 1
+                    returns.append(ret)
+
+            if len(returns) < window_days - 2:  # Allow some missing days
+                return None
+
+            # Calculate standard deviation
+            mean_ret = sum(returns) / len(returns)
+            variance = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
+            daily_std = math.sqrt(variance)
+
+            # Annualize: daily_std * sqrt(252)
+            annualized_vol = daily_std * math.sqrt(252) * 100  # As percentage
+
+            # Get threshold from config
+            from EarningsCallAgenticRag.utils.config import MARKET_STRESS_VOL_THRESHOLD_ANNUAL
+            is_high_stress = annualized_vol > MARKET_STRESS_VOL_THRESHOLD_ANNUAL
+
+            return {
+                "index": index_symbol,
+                "target_date": target_date,
+                "daily_std_pct": daily_std * 100,
+                "annualized_vol_pct": annualized_vol,
+                "is_high_stress": is_high_stress,
+                "threshold_pct": MARKET_STRESS_VOL_THRESHOLD_ANNUAL,
+                "window_start": str(prices[0][0]) if prices else None,
+                "window_end": str(prices[-1][0]) if prices else None,
+                "data_points": len(returns),
+            }
+        except Exception as e:
+            logger.debug(f"get_market_volatility error: {e}")
+    return None
+
+
+def is_market_stress(target_date: str, index_symbol: str = "SPY") -> bool:
+    """
+    Check if market is in high stress mode as of target_date.
+
+    Args:
+        target_date: Date to check (YYYY-MM-DD)
+        index_symbol: Market index symbol (default: SPY)
+
+    Returns:
+        True if market volatility exceeds threshold, False otherwise
+    """
+    from EarningsCallAgenticRag.utils.config import (
+        MARKET_STRESS_GATE_ENABLED,
+        MARKET_STRESS_VOL_WINDOW
+    )
+
+    if not MARKET_STRESS_GATE_ENABLED:
+        return False
+
+    vol_data = get_market_volatility(target_date, index_symbol, MARKET_STRESS_VOL_WINDOW)
+    if vol_data is None:
+        return False  # Default to no stress if data unavailable
+
+    return vol_data.get("is_high_stress", False)
+
+
+# =============================================================================
 # Statistics
 # =============================================================================
 

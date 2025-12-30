@@ -45,6 +45,7 @@ from utils.config import (
     PG_AGENT_EARNINGS_FACTS_LIMIT,
     PG_AGENT_HISTORICAL_EXCERPTS_LIMIT,
     PG_AGENT_COMPARATIVE_FACTS_LIMIT,
+    MAX_TOKENS_HELPER,
 )
 
 logger = logging.getLogger(__name__)
@@ -130,23 +131,30 @@ class BasePgAgent(ABC):
         self.temperature = temperature
         self.token_tracker = TokenTracker()
 
-    def _call_llm(self, system_message: str, user_message: str) -> str:
+    def _call_llm(self, system_message: str, user_message: str, max_tokens: int | None = None) -> str:
         """Make an LLM call with token tracking.
 
         Args:
             system_message: System prompt
             user_message: User prompt
+            max_tokens: Maximum tokens for response (None = use default MAX_TOKENS_HELPER)
 
         Returns:
             LLM response content
         """
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
+        kwargs = {
+            "model": self.model,
+            "messages": [
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message},
             ],
-        )
+            "max_tokens": max_tokens if max_tokens is not None else MAX_TOKENS_HELPER,
+        }
+        # GPT-5 models only support temperature=1; others use configured temperature
+        if "gpt-5" not in self.model.lower():
+            kwargs["temperature"] = self.temperature
+
+        resp = self.client.chat.completions.create(**kwargs)
 
         if hasattr(resp, 'usage') and resp.usage:
             self.token_tracker.add_usage(

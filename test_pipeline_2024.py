@@ -304,8 +304,8 @@ async def main():
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     # Get model config
-    main_model = os.getenv("MAIN_MODEL", "cli-gpt-5.2")
-    helper_model = os.getenv("HELPER_MODEL", "cli-gpt-5.2")
+    main_model = os.getenv("MAIN_MODEL", "gpt-5-mini")
+    helper_model = os.getenv("HELPER_MODEL", "gpt-4o-mini")
     print(f"\nModels: main={main_model}, helper={helper_model}")
 
     # Get random samples

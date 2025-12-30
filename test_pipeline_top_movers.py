@@ -145,7 +145,15 @@ async def analyze_single(
         "time_seconds": 0,
         "prediction": None,
         "confidence": None,
+        "direction_score": None,  # Raw 0-10 score from LLM
+        "conviction": None,  # Distance from neutral (0..1)
+        "down_strength": None,  # Bearish conviction (0..1)
+        "trade_signal": None,  # SHORT/LONG/HOLD
         "actual_return": None,
+        "return_t": None,  # Earnings day return (T+0)
+        "return_1d": None,  # T+1 return
+        "return_3d": None,  # T+3 return
+        "return_30d": None,  # Actual T+30 return from pg_client
         "correct": None,
         "summary": None,
         "reasons": None,
@@ -169,6 +177,14 @@ async def analyze_single(
         agentic = payload.get("agentic_result", {})
         result["prediction"] = agentic.get("prediction")
         result["confidence"] = agentic.get("confidence")
+        result["direction_score"] = agentic.get("direction_score")
+        result["conviction"] = agentic.get("conviction")
+        result["down_strength"] = agentic.get("down_strength")
+        result["trade_signal"] = agentic.get("trade_signal")
+        result["return_t"] = agentic.get("return_t")
+        result["return_1d"] = agentic.get("return_1d")
+        result["return_3d"] = agentic.get("return_3d")
+        result["return_30d"] = agentic.get("return_30d")
         result["summary"] = agentic.get("summary")
         result["reasons"] = agentic.get("reasons")
 
@@ -181,6 +197,10 @@ async def analyze_single(
             result["actual_return"] = backtest["change_pct"]
         elif payload.get("post_earnings_return") is not None:
             result["actual_return"] = payload["post_earnings_return"]
+
+        # Prefer return_30d from agentic result if available
+        if result["return_30d"] is not None:
+            result["actual_return"] = result["return_30d"]
 
     except Exception as e:
         result["error"] = str(e)
@@ -235,11 +255,14 @@ def print_result_line(idx: int, total: int, result: Dict, sample: Dict):
     if result["success"]:
         pred = result.get("prediction", "N/A")
         conf = result.get("confidence", 0) or 0
+        dir_score = result.get("direction_score")
+        trade_sig = result.get("trade_signal", "-")
         actual = sample.get("actual_return_30d", 0)
         correct = calculate_correctness(pred, actual)
         correct_str = "✓" if correct else ("✗" if correct is False else "?")
         time_s = result["time_seconds"]
-        print(f"  [{idx}/{total}] {status} {symbol} {quarter} ({category}) | Pred: {pred} ({conf:.2f}) | Actual: {actual:+.2f}% | Hit: {correct_str} | {time_s:.1f}s")
+        dir_str = f"D:{dir_score}" if dir_score is not None else "D:?"
+        print(f"  [{idx}/{total}] {status} {symbol} {quarter} ({category}) | {dir_str} {trade_sig} | Pred: {pred} ({conf:.2f}) | Actual: {actual:+.2f}% | Hit: {correct_str} | {time_s:.1f}s")
     else:
         error = result.get("error", "Unknown")[:60]
         print(f"  [{idx}/{total}] {status} {symbol} {quarter} ({category}) | ERROR: {error}")
@@ -260,11 +283,20 @@ def print_interim_summary(results: List[Dict], samples: List[Dict]):
     losers_correct = 0
     losers_total = 0
 
+    # Short-only strategy metrics
+    short_signals = []  # List of (direction_score, actual_return, is_correct)
+    direction_scores = []
+
     for r in successful:
         key = (r["symbol"], r["year"], r["quarter"])
         sample = sample_lookup.get(key, {})
         actual = sample.get("actual_return_30d")
         category = sample.get("category")
+        dir_score = r.get("direction_score")
+        trade_signal = r.get("trade_signal")
+
+        if dir_score is not None:
+            direction_scores.append(dir_score)
 
         if r["prediction"] and actual is not None:
             total_with_prediction += 1
@@ -281,6 +313,12 @@ def print_interim_summary(results: List[Dict], samples: List[Dict]):
                 if is_correct:
                     losers_correct += 1
 
+            # Track short signals for strategy analysis
+            if trade_signal == "SHORT" and dir_score is not None:
+                # Short is correct if actual return is negative
+                short_correct = actual < 0
+                short_signals.append((dir_score, actual, short_correct))
+
     times = [r["time_seconds"] for r in successful]
     total_time = sum(times) if times else 0
     avg_time = total_time / len(times) if times else 0
@@ -294,7 +332,46 @@ def print_interim_summary(results: List[Dict], samples: List[Dict]):
             print(f"  Gainers: {gainers_correct}/{gainers_total} = {gainers_correct/gainers_total*100:.1f}%")
         if losers_total > 0:
             print(f"  Losers: {losers_correct}/{losers_total} = {losers_correct/losers_total*100:.1f}%")
-    print(f"Avg time: {avg_time:.1f}s | Total time: {total_time:.1f}s")
+
+    # Short-only strategy analysis
+    if short_signals:
+        short_correct_count = sum(1 for _, _, correct in short_signals if correct)
+        short_precision = short_correct_count / len(short_signals) * 100
+        short_returns = [actual for _, actual, _ in short_signals]
+        avg_short_return = sum(short_returns) / len(short_returns)
+
+        # Tail risk metrics (for shorts, worst = most positive return)
+        worst_ret = max(short_returns)
+        sorted_rets = sorted(short_returns, reverse=True)
+        p90_idx = max(0, int(len(sorted_rets) * 0.10) - 1)
+        p95_idx = max(0, int(len(sorted_rets) * 0.05) - 1)
+        p90_worst = sorted_rets[p90_idx] if sorted_rets else 0
+        p95_worst = sorted_rets[p95_idx] if sorted_rets else 0
+
+        print(f"\n📊 Short-Only Strategy Analysis:")
+        print(f"  SHORT signals: {len(short_signals)} | Precision: {short_correct_count}/{len(short_signals)} = {short_precision:.1f}%")
+        print(f"  Avg return on SHORT: {avg_short_return:+.2f}% | Median: {sorted(short_returns)[len(short_returns)//2]:+.2f}%")
+        print(f"  ⚠️  Tail Risk: Worst: {worst_ret:+.2f}% | P90: {p90_worst:+.2f}% | P95: {p95_worst:+.2f}%")
+
+        # Breakdown by direction score ranges (including 0)
+        for min_d, max_d in [(0, 2), (3, 4), (0, 4)]:
+            range_shorts = [(d, a, c) for d, a, c in short_signals if min_d <= d <= max_d]
+            if range_shorts:
+                range_correct = sum(1 for _, _, c in range_shorts if c)
+                range_prec = range_correct / len(range_shorts) * 100
+                range_rets = [a for _, a, _ in range_shorts]
+                range_avg_ret = sum(range_rets) / len(range_rets)
+                range_worst = max(range_rets)
+                print(f"    D:{min_d}-{max_d}: {len(range_shorts)} signals, {range_prec:.1f}% precision, avg: {range_avg_ret:+.2f}%, worst: {range_worst:+.2f}%")
+
+    if direction_scores:
+        print(f"\n📈 Direction Score Distribution:")
+        for score in range(0, 11):
+            count = sum(1 for d in direction_scores if d == score)
+            if count > 0:
+                print(f"    D:{score}: {count} ({count/len(direction_scores)*100:.1f}%)")
+
+    print(f"\nAvg time: {avg_time:.1f}s | Total time: {total_time:.1f}s")
 
 
 def save_results_csv(results: List[Dict], samples: List[Dict], filename: str) -> str:
@@ -309,6 +386,17 @@ def save_results_csv(results: List[Dict], samples: List[Dict], filename: str) ->
         actual = sample.get("actual_return_30d")
         correct = calculate_correctness(r.get("prediction"), actual) if r["success"] else None
 
+        # Calculate short signal correctness
+        dir_score = r.get("direction_score")
+        trade_signal = r.get("trade_signal")
+        short_correct = None
+        if trade_signal == "SHORT" and actual is not None:
+            short_correct = actual < 0
+
+        # Get conviction scores
+        conviction = r.get("conviction")
+        down_strength = r.get("down_strength")
+
         row = {
             "symbol": r["symbol"],
             "year": r["year"],
@@ -320,12 +408,20 @@ def save_results_csv(results: List[Dict], samples: List[Dict], filename: str) ->
             "error": r.get("error", ""),
             "time_seconds": round(r["time_seconds"], 2),
             "prediction": r.get("prediction", ""),
+            "direction_score": dir_score if dir_score is not None else "",
+            "conviction": round(conviction, 3) if conviction is not None else "",
+            "down_strength": round(down_strength, 3) if down_strength is not None else "",
+            "trade_signal": trade_signal or "",
             "confidence": round(r["confidence"], 3) if r.get("confidence") else "",
+            "return_t_pct": round(r["return_t"], 2) if r.get("return_t") is not None else "",
+            "return_1d_pct": round(r["return_1d"], 2) if r.get("return_1d") is not None else "",
+            "return_3d_pct": round(r["return_3d"], 2) if r.get("return_3d") is not None else "",
             "actual_return_30d_pct": round(actual, 2) if actual is not None else "",
             "correct": correct if correct is not None else "",
+            "short_correct": short_correct if short_correct is not None else "",
             "summary": str(r.get("summary") or "")[:500],
             "reasons": json.dumps(r.get("reasons") or []),
-            "token_cost_usd": round(calculate_token_cost(r.get("token_usage")), 4),
+            "token_cost_usd": round(float((r.get("token_usage") or {}).get("cost_usd", 0.0) or 0.0), 6),
             "agent_notes": str(r.get("agent_notes") or "")[:1000],
         }
         rows.append(row)
@@ -447,8 +543,8 @@ async def main():
     print(f"Mode: {'TEST (3 samples)' if test_mode else 'FULL (200 samples)'}")
     print(f"Concurrency: {concurrency} workers")
 
-    main_model = os.getenv("MAIN_MODEL", "cli-gpt-5.2")
-    helper_model = os.getenv("HELPER_MODEL", "cli-gpt-5.2")
+    main_model = os.getenv("MAIN_MODEL", "gpt-5-mini")
+    helper_model = os.getenv("HELPER_MODEL", "gpt-4o-mini")
     print(f"Models: main={main_model}, helper={helper_model}")
 
     # Get top movers

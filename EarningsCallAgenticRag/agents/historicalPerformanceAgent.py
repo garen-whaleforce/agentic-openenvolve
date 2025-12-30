@@ -285,15 +285,19 @@ class HistoricalPerformanceAgent:
             fact=facts,  # pass the list of facts
             similar_facts=all_similar,  # pass the aggregated similar facts
         )
-        
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
+
+        # GPT-5 models only support temperature=1; others use configured temperature
+        kwargs = {
+            "model": self.model,
+            "messages": [
                 {"role": "system", "content": get_financials_system_message()},
                 {"role": "user", "content": prompt},
             ],
-            top_p=1,
-        )
+        }
+        if "gpt-5" not in self.model.lower():
+            kwargs["temperature"] = self.temperature
+
+        resp = self.client.chat.completions.create(**kwargs)
         
         # Track token usage
         if hasattr(resp, 'usage') and resp.usage:

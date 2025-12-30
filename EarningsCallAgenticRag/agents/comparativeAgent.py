@@ -396,14 +396,19 @@ class ComparativeAgent:
         #print(f"{'='*80}\n")
 
         try:
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
+            # GPT-5 models only support temperature=1; others use configured temperature
+            kwargs = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": get_comparative_system_message()},
                     {"role": "user", "content": prompt},
                 ],
-            )
-            
+            }
+            if "gpt-5" not in self.model.lower():
+                kwargs["temperature"] = self.temperature
+
+            resp = self.client.chat.completions.create(**kwargs)
+
             # Track token usage
             if hasattr(resp, 'usage') and resp.usage:
                 self.token_tracker.add_usage(
@@ -411,7 +416,7 @@ class ComparativeAgent:
                     output_tokens=resp.usage.completion_tokens,
                     model=self.model
                 )
-            
+
             return resp.choices[0].message.content.strip()
         except Exception as exc:
             return f"❌ ComparativeAgent error: {exc}"

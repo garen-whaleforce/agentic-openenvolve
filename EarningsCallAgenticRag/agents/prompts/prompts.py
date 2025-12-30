@@ -65,14 +65,16 @@ You are a precise fact extraction specialist for earnings call transcripts.
 
 Your role:
 - Extract concrete, verifiable facts from earnings calls
-- Categorize each fact into: Result, Forward-Looking, Risk Disclosure, Sentiment, or Macro
+- Categorize each fact into: Result, Forward-Looking, Risk Disclosure, Sentiment, Macro, or Warning Sign
 - Include specific numbers, percentages, and metrics whenever available
 - Preserve the exact wording of management guidance and outlook statements
+- Pay special attention to Warning Signs (inventory build-up, DSO increases, churn, restructuring, margin pressure)
 
 Quality standards:
 - Each fact should be self-contained and understandable without additional context
 - Prefer quantitative facts over vague qualitative statements
 - Capture both positive and negative information objectively
+- Prioritize Warning Signs as they are highly predictive of negative price movements
 """.strip()
 
 
@@ -93,6 +95,8 @@ Routing principles:
 - Financial metrics (revenue, EPS, margins) → InspectPastStatements
 - Guidance and outlook statements → QueryPastCalls
 - Competitive positioning and market share → CompareWithPeers
+- Warning Signs (inventory, DSO, churn, restructuring, margin pressure) → InspectPastStatements + QueryPastCalls
+- Risk Disclosures → QueryPastCalls (to check if recurring issue)
 - A fact may be routed to multiple tools if relevant
 """.strip()
 
@@ -259,16 +263,18 @@ _DEFAULT_MAIN_AGENT_PROMPT = """
 You are a portfolio manager focusing on medium-term post-earnings price movements over the next 30 trading days (approximately 6 weeks).
 
 You are given:
-- The original earnings call transcript.{{transcript_section}}
+- **KEY FACTS** - The most important extracted facts from the earnings call (compressed for efficiency).
 - Structured notes comparing this quarter's results and guidance versus the company's own history and versus peers.
 - Key financial statement excerpts and year-on-year changes.
+- **Market/Expectations Anchors** - critical pricing data that shows how the market has already reacted.
 
 Your job is to decide whether the stock price is likely to **increase ("Up") or decrease ("Down") over the next 30 trading days after the earnings call**, and to assign a **Direction score from 0 to 10**.
 
+{{market_anchors_section}}
+
 Use the information below:
 
-Original transcript:
-{{original_transcript}}
+{{key_facts_section}}
 
 {{financial_statements_section}}
 {{qoq_section_str}}
@@ -715,11 +721,28 @@ def main_agent_prompt(
     memory_txt: str | None = None,
     financial_statements_facts: str | None = None,
     qoq_section: str | None = None,
+    market_anchors: Dict[str, Any] | None = None,
+    key_facts: List[Dict[str, Any]] | None = None,
 ) -> str:
     """Prompt for the *Main* decision-making agent."""
     template = get_prompt_override("MAIN_AGENT_PROMPT", _DEFAULT_MAIN_AGENT_PROMPT)
 
-    transcript_section = f"\nORIGINAL EARNINGS CALL TRANSCRIPT:\n---\n{original_transcript}\n---\n" if original_transcript else ""
+    # Build compressed key facts section (replaces full transcript)
+    key_facts_section = ""
+    if key_facts:
+        lines = ["---", "**KEY FACTS FROM EARNINGS CALL** (top extracted facts):"]
+        for i, fact in enumerate(key_facts[:20], 1):  # Limit to top 20 facts
+            fact_type = fact.get("type", "")
+            metric = fact.get("metric", "")
+            value = fact.get("value", "")
+            context = fact.get("context", fact.get("reason", ""))
+            # Compress format: Type | Metric: Value - Context
+            line = f"{i}. [{fact_type}] {metric}: {value}"
+            if context:
+                line += f" — {context[:100]}"  # Truncate long contexts
+            lines.append(line)
+        lines.append("---")
+        key_facts_section = "\n".join(lines)
 
     financial_statements_section = ""
     if financial_statements_facts:
@@ -738,10 +761,32 @@ Financial Statements Facts (YoY):
     if memory_txt:
         memory_section = f"\n{memory_txt}\n"
 
+    # Build market anchors section
+    market_anchors_section = ""
+    if market_anchors:
+        lines = ["---", "**MARKET/EXPECTATIONS ANCHORS** (known at/around the call):"]
+        if market_anchors.get("pre_earnings_5d_return") is not None:
+            lines.append(f"- Pre-earnings 5-day return: {market_anchors['pre_earnings_5d_return']:+.2f}%")
+        if market_anchors.get("earnings_day_return") is not None:
+            lines.append(f"- Earnings-day move (T): {market_anchors['earnings_day_return']:+.2f}%")
+        if market_anchors.get("eps_surprise") is not None:
+            eps_actual = market_anchors.get("eps_actual", "N/A")
+            eps_estimated = market_anchors.get("eps_estimated", "N/A")
+            lines.append(f"- EPS surprise: {market_anchors['eps_surprise']:+.2f} (actual {eps_actual} vs est {eps_estimated})")
+        if market_anchors.get("market_timing"):
+            lines.append(f"- Timing: {market_anchors['market_timing']}")
+
+        lines.append("")
+        lines.append("**Interpretation rules:**")
+        lines.append("- Large pre-run-up + only in-line guidance => elevated sell-the-news risk")
+        lines.append("- EPS miss or guide-down => negative weight dominates")
+        lines.append("- If market reacted strongly DOWN on the day, require explicit guide-up + accelerating demand to call UP")
+        lines.append("- Strong pre-earnings momentum (>10%) with no positive catalyst => likely pullback")
+        lines.append("---")
+        market_anchors_section = "\n".join(lines)
+
     return template.replace(
-        "{{transcript_section}}", transcript_section
-    ).replace(
-        "{{original_transcript}}", original_transcript or ""
+        "{{key_facts_section}}", key_facts_section
     ).replace(
         "{{financial_statements_section}}", financial_statements_section
     ).replace(
@@ -754,6 +799,8 @@ Financial Statements Facts (YoY):
         "{{notes_peers}}", notes.get('peers', '') if notes else ''
     ).replace(
         "{{memory_section}}", memory_section
+    ).replace(
+        "{{market_anchors_section}}", market_anchors_section
     )
 
 

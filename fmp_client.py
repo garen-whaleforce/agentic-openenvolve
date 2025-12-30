@@ -11,6 +11,9 @@ from storage import get_fmp_cache, set_fmp_cache
 
 load_dotenv()
 
+# Import return horizon from centralized config
+RETURN_HORIZON_DAYS = int(os.getenv("RETURN_HORIZON_DAYS", "30"))
+
 # PostgreSQL Database - primary data source (falls back to API if unavailable)
 try:
     import pg_client
@@ -965,7 +968,7 @@ def get_earnings_context(symbol: str, year: int, quarter: int) -> Dict:
 
     # TODO: Incorporate historical price context via FMP price APIs.
     price_window = []
-    post_earnings = compute_post_return(symbol, transcript.get("date") or "", days=3)
+    post_earnings = compute_post_return(symbol, transcript.get("date") or "", days=RETURN_HORIZON_DAYS)
     post_earnings_return = post_earnings.get("return")
 
     calendar_year = None
@@ -1007,7 +1010,7 @@ async def get_earnings_context_async(symbol: str, year: int, quarter: int) -> Di
     profile, transcript, financials = await asyncio.gather(profile_task, transcript_task, financials_task)
 
     # post-return uses sync httpx client; move to thread
-    post_earnings = await asyncio.to_thread(compute_post_return, symbol, transcript.get("date") or "", 3)
+    post_earnings = await asyncio.to_thread(compute_post_return, symbol, transcript.get("date") or "", RETURN_HORIZON_DAYS)
     post_earnings_return = post_earnings.get("return")
 
     calendar_year = None
